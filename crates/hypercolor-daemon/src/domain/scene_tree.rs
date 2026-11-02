@@ -171,6 +171,7 @@ fn zone_member(output: &Output) -> ZoneMember {
         device_id: output.device_id.clone(),
         segment: output.zone_name.clone(),
         name: output.name.clone(),
+        attachment: output.attachment.clone(),
     }
 }
 

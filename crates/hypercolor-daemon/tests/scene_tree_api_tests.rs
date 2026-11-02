@@ -33,8 +33,8 @@ use hypercolor_types::layer::LayerSource;
 use hypercolor_types::library::PresetId;
 use hypercolor_types::scene::ZoneId;
 use hypercolor_types::spatial::{
-    EdgeBehavior, LedTopology, NormalizedPosition, Output, SamplingMode, SpatialLayout,
-    StripDirection,
+    EdgeBehavior, LedTopology, NormalizedPosition, Output, OutputComponent, SamplingMode,
+    SpatialLayout, StripDirection,
 };
 use serde_json::json;
 use tower::ServiceExt;
@@ -223,6 +223,15 @@ async fn seed_tree(state: &Arc<AppState>) -> EffectId {
             state: EffectState::Loading,
         })
         .await;
+    let mut attached_output = sample_output("out-a", Some("ch1"));
+    attached_output.attachment = Some(OutputComponent {
+        template_id: "custom-strip-563548-0".to_owned(),
+        slot_id: "corsair-dram".to_owned(),
+        instance: 0,
+        led_start: Some(0),
+        led_count: Some(4),
+        led_mapping: Some(vec![3, 2, 1, 0]),
+    });
     let mut mutation = state.scene_manager.begin_mutation().await;
     mutation
         .upsert_primary_zone(
@@ -230,7 +239,7 @@ async fn seed_tree(state: &Arc<AppState>) -> EffectId {
             HashMap::<String, ControlValue>::new(),
             None,
             sample_layout(vec![
-                sample_output("out-a", Some("ch1")),
+                attached_output,
                 sample_output("out-b", Some("ch2")),
             ]),
             hypercolor_types::event::ChangeTrigger::System,
@@ -338,6 +347,18 @@ async fn the_document_embeds_real_layer_identity_and_segment_members() {
     let members = zone["members"].as_array().expect("members array");
     assert_eq!(members.len(), 2);
     assert_eq!(members[0]["segment"], "ch1");
+    assert_eq!(
+        members[0]["attachment"],
+        json!({
+            "template_id": "custom-strip-563548-0",
+            "slot_id": "corsair-dram",
+            "instance": 0,
+            "led_start": 0,
+            "led_count": 4,
+            "led_mapping": [3, 2, 1, 0]
+        }),
+        "the live scene API preserves every physical-component field"
+    );
     assert!(
         members[0].get("zone_name").is_none(),
         "device regions are segments on this surface (Spec 78 §5.1)"
