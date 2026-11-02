@@ -88,6 +88,93 @@ pub(crate) fn draws_output(zone: &Output, devices: &[api::DeviceSummary]) -> boo
             .is_some_and(|device| classify_device(device) == DeviceClass::Controller)
 }
 
+#[cfg(test)]
+mod visibility_tests {
+    use super::*;
+    use hypercolor_types::device::{
+        DeviceClassHint, DeviceOrigin, DriverPresentation, DriverTransportKind,
+    };
+    use hypercolor_types::spatial::{
+        LedTopology, OutputComponent, StripDirection,
+    };
+
+    fn output(attachment: Option<OutputComponent>) -> Output {
+        Output {
+            id: "channel-1".to_owned(),
+            name: "Channel 1".to_owned(),
+            device_id: "openrgb:controller".to_owned(),
+            zone_name: Some("Channel 1".to_owned()),
+            position: NormalizedPosition::new(0.5, 0.5),
+            size: NormalizedPosition::new(0.2, 0.1),
+            rotation: 0.0,
+            scale: 1.0,
+            display_order: 0,
+            orientation: None,
+            topology: LedTopology::Strip {
+                count: 12,
+                direction: StripDirection::LeftToRight,
+            },
+            led_positions: Vec::new(),
+            led_mapping: None,
+            sampling_mode: None,
+            edge_behavior: None,
+            shape: None,
+            shape_preset: None,
+            attachment,
+            brightness: None,
+        }
+    }
+
+    fn device(class: DeviceClassHint) -> api::DeviceSummary {
+        api::DeviceSummary {
+            id: "openrgb:controller".to_owned(),
+            layout_device_id: "openrgb:controller".to_owned(),
+            name: "Fixture".to_owned(),
+            origin: DeviceOrigin::new("fixture", "openrgb", DriverTransportKind::Bridge),
+            presentation: DriverPresentation {
+                label: "Fixture".to_owned(),
+                short_label: None,
+                accent_rgb: None,
+                secondary_rgb: None,
+                icon: None,
+                default_device_class: Some(class),
+            },
+            status: "connected".to_owned(),
+            brightness: 100,
+            display_rotation: None,
+            firmware_version: None,
+            connection: api::DeviceConnectionSummary::default(),
+            total_leds: 12,
+            auth: None,
+            segments: Vec::new(),
+            attachments: None,
+            bridge: None,
+        }
+    }
+
+    #[test]
+    fn controller_component_draws_while_its_raw_channel_stays_hidden() {
+        let controller = device(DeviceClassHint::Controller);
+        let attachment = OutputComponent {
+            template_id: "custom-strip".to_owned(),
+            slot_id: "channel-1".to_owned(),
+            instance: 0,
+            led_start: Some(0),
+            led_count: Some(12),
+            led_mapping: None,
+        };
+
+        assert!(draws_output(&output(Some(attachment)), std::slice::from_ref(&controller)));
+        assert!(!draws_output(&output(None), &[controller]));
+    }
+
+    #[test]
+    fn fixed_devices_draw_without_attachment_metadata() {
+        let keyboard = device(DeviceClassHint::Keyboard);
+        assert!(draws_output(&output(None), &[keyboard]));
+    }
+}
+
 /// What a box shows: its geometry style, accent, and identity. `None` for
 /// an output the canvas does not draw.
 fn zone_render_data(

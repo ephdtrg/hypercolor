@@ -91,7 +91,7 @@ pub fn zone_outputs(zone: &ZoneResource) -> Vec<Output> {
                     edge_behavior: None,
                     shape: None,
                     shape_preset: None,
-                    attachment: None,
+                    attachment: member.attachment.clone(),
                     brightness: None,
                 })
             })

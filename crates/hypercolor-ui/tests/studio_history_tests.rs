@@ -3,6 +3,7 @@ use hypercolor_types::layer::{
     BlendMode, LayerAdjust, LayerSource, LayerTransform, SceneLayer, SceneLayerId,
 };
 use hypercolor_types::scene::{ZoneId, ZoneRole};
+use hypercolor_types::spatial::OutputComponent;
 use hypercolor_ui::compound_selection::CompoundDepth;
 use hypercolor_ui::layout_history::LayoutEditorSnapshot;
 use hypercolor_ui::pages::studio::history::{
@@ -27,6 +28,30 @@ fn scene() -> SceneDocument {
             "members":[{"id":"stand","device_id":"usb:stand","segment":"Main","name":"Stand"}],
             "layout":{"placements":[{"member":"stand","position":{"x":0.7,"y":0.5},"size":{"x":0.1,"y":0.1},"topology":{"type":"strip","count":15,"direction":"left_to_right"}}]},"layers":[] }]
     })).expect("valid scene fixture")
+}
+
+#[test]
+fn scene_members_restore_attachment_metadata_without_duplicating_led_mapping() {
+    let expected = OutputComponent {
+        template_id: "custom-strip-563548-0".to_owned(),
+        slot_id: "corsair-dram".to_owned(),
+        instance: 1,
+        led_start: Some(12),
+        led_count: Some(12),
+        led_mapping: Some(vec![11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
+    };
+    let mut scene = scene();
+    scene.zones[0].members[0].attachment = Some(expected.clone());
+
+    let output = hypercolor_ui::api::zone_outputs(&scene.zones[0]).remove(0);
+
+    assert_eq!(output.attachment, Some(expected));
+    assert_eq!(
+        output.led_mapping, None,
+        "component mapping stays metadata and is not applied twice"
+    );
+    assert_eq!(output.topology.led_count(), 15);
+    assert_eq!(output.position.x, 0.7);
 }
 
 #[test]
