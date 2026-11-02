@@ -76,6 +76,7 @@ fn zone_resource_with_outputs(outputs: Vec<Output>) -> ZoneResource {
                 device_id: output.device_id,
                 segment: output.zone_name,
                 name: output.name,
+                attachment: None,
             };
             let placement = MemberPlacement {
                 member: member_id,

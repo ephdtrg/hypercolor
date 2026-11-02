@@ -310,7 +310,7 @@ pub struct RingDef {
 }
 
 /// Attachment metadata carried by imported layout outputs.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct OutputComponent {
     /// Bound attachment template identifier.

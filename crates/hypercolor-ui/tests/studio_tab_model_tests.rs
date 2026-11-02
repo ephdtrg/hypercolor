@@ -31,6 +31,7 @@ fn zone(name: &str, role: ZoneRole, devices: &[&str]) -> ZoneResource {
                 device_id: (*device).to_owned(),
                 segment: None,
                 name: format!("{device} output"),
+                attachment: None,
             })
             .collect(),
         layout: None,

@@ -130,12 +130,55 @@ fn zone_members_use_segment_vocabulary_on_the_wire() {
         device_id: "usb:controller-1".into(),
         segment: None,
         name: "Strip".into(),
+        attachment: None,
     };
     let wire = serde_json::to_value(&member).expect("serializes");
     assert!(wire.get("segment").is_some(), "field is named segment");
     assert!(
         wire.get("zone_name").is_none(),
         "device regions are segments, never zones (Spec 78 §5.1)"
+    );
+}
+
+#[test]
+fn zone_members_round_trip_physical_component_metadata() {
+    let wire = json!({
+        "id": "attachment-openrgb_563548-0",
+        "device_id": "openrgb:563548",
+        "segment": "DRAM 0",
+        "name": "Corsair Dominator Platinum RGB DDR5",
+        "attachment": {
+            "template_id": "custom-strip-563548-0",
+            "slot_id": "corsair-dram",
+            "instance": 0,
+            "led_start": 0,
+            "led_count": 12,
+            "led_mapping": [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+        }
+    });
+
+    let member: ZoneMember = serde_json::from_value(wire.clone()).expect("member decodes");
+    assert_eq!(
+        serde_json::to_value(member).expect("member encodes"),
+        wire,
+        "scene members preserve every physical-component field"
+    );
+}
+
+#[test]
+fn legacy_zone_members_without_attachment_still_round_trip() {
+    let wire = json!({
+        "id": "out-1",
+        "device_id": "usb:controller-1",
+        "segment": "ch1",
+        "name": "Strip"
+    });
+
+    let member: ZoneMember = serde_json::from_value(wire.clone()).expect("legacy member decodes");
+    assert_eq!(
+        serde_json::to_value(member).expect("legacy member encodes"),
+        wire,
+        "an absent optional field stays absent"
     );
 }
 

@@ -30,7 +30,7 @@ use crate::scene::{
     DisplayFaceTarget, SceneId, SceneKind, SceneMutationMode, ScenePriority, TransitionSpec,
     UnassignedBehavior, ZoneId, ZoneRole,
 };
-use crate::spatial::{LedTopology, NormalizedPosition, Orientation};
+use crate::spatial::{LedTopology, NormalizedPosition, Orientation, OutputComponent};
 use serde::{Deserialize, Serialize};
 
 /// A scene revision fence as it travels in `ETag` and `If-Match`.
@@ -309,6 +309,9 @@ pub struct ZoneMember {
     pub segment: Option<String>,
     /// Human-readable name carried from the layout output.
     pub name: String,
+    /// Physical component attached to this controller segment, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<OutputComponent>,
 }
 
 /// `PATCH /scene` — scene-level fields only (Spec 78 §1.2).

@@ -165,6 +165,7 @@ fn zone_resource(id: ZoneId, devices: &[&str]) -> ZoneResource {
                 device_id: (*device).to_owned(),
                 segment: None,
                 name: format!("{device} output"),
+                attachment: None,
             })
             .collect(),
         layout: None,

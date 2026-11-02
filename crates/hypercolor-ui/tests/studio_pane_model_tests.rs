@@ -26,6 +26,7 @@ fn zone(name: &str, role: ZoneRole, members: &[(&str, Option<&str>, u32)]) -> Zo
                 device_id: (*device).to_owned(),
                 segment: segment.map(str::to_owned),
                 name: format!("{device} {}", segment.unwrap_or("")),
+                attachment: None,
             };
             let placement = MemberPlacement {
                 member: id,
