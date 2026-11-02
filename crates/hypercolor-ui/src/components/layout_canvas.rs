@@ -94,9 +94,7 @@ mod visibility_tests {
     use hypercolor_types::device::{
         DeviceClassHint, DeviceOrigin, DriverPresentation, DriverTransportKind,
     };
-    use hypercolor_types::spatial::{
-        LedTopology, OutputComponent, StripDirection,
-    };
+    use hypercolor_types::spatial::{LedTopology, OutputComponent, StripDirection};
 
     fn output(attachment: Option<OutputComponent>) -> Output {
         Output {
@@ -164,7 +162,10 @@ mod visibility_tests {
             led_mapping: None,
         };
 
-        assert!(draws_output(&output(Some(attachment)), std::slice::from_ref(&controller)));
+        assert!(draws_output(
+            &output(Some(attachment)),
+            std::slice::from_ref(&controller)
+        ));
         assert!(!draws_output(&output(None), &[controller]));
     }
 

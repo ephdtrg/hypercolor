@@ -238,10 +238,7 @@ async fn seed_tree(state: &Arc<AppState>) -> EffectId {
             &metadata,
             HashMap::<String, ControlValue>::new(),
             None,
-            sample_layout(vec![
-                attached_output,
-                sample_output("out-b", Some("ch2")),
-            ]),
+            sample_layout(vec![attached_output, sample_output("out-b", Some("ch2"))]),
             hypercolor_types::event::ChangeTrigger::System,
             None,
         )
