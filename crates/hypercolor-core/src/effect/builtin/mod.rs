@@ -16,6 +16,8 @@
 //! | `solid_color`   | Ambient        | Solid fills plus split and checker diagnostics   |
 //! | `gradient`      | Ambient        | Vivid gradient with Oklch blending and saturation |
 //! | `rainbow`       | Ambient        | Cycling rainbow hue sweep                        |
+//! | `smooth_rgb_cycle` | Ambient     | Uniform canvas-wide HSV color cycle              |
+//! | `asus_aura_rainbow` | Ambient   | Moving vertical ASUS Aura-style rainbow bands   |
 //! | `breathing`     | Ambient        | Sinusoidal brightness pulsation                  |
 //! | `audio_pulse`   | Audio          | RMS + beat-reactive color modulation             |
 //! | `color_wave`    | Ambient        | Traveling wavefront bands with fade trails       |
@@ -24,6 +26,7 @@
 //! | `media_player`  | Source         | User media asset playback                        |
 //! | `calibration`   | Utility        | High-contrast layout calibration patterns        |
 
+mod asus_aura_rainbow;
 mod audio_pulse;
 mod breathing;
 mod calibration;
@@ -34,6 +37,7 @@ mod gradient;
 mod media_player;
 mod rainbow;
 mod screen_cast;
+mod smooth_rgb_cycle;
 mod solid_color;
 #[cfg(feature = "servo")]
 mod web_viewport;
@@ -42,6 +46,7 @@ use std::time::SystemTime;
 
 use hypercolor_types::effect::{EffectMetadata, EffectState};
 
+pub use self::asus_aura_rainbow::AsusAuraRainbowRenderer;
 pub use self::audio_pulse::AudioPulseRenderer;
 pub use self::breathing::BreathingRenderer;
 pub use self::calibration::CalibrationRenderer;
@@ -51,6 +56,7 @@ pub use self::gradient::GradientRenderer;
 pub use self::media_player::MediaPlayerRenderer;
 pub use self::rainbow::RainbowRenderer;
 pub use self::screen_cast::ScreenCastRenderer;
+pub use self::smooth_rgb_cycle::SmoothRgbCycleRenderer;
 pub use self::solid_color::SolidColorRenderer;
 #[cfg(feature = "servo")]
 pub use self::web_viewport::WebViewportRenderer;
@@ -63,6 +69,8 @@ fn builtin_metadata() -> Vec<EffectMetadata> {
         solid_color::metadata(),
         gradient::metadata(),
         rainbow::metadata(),
+        smooth_rgb_cycle::metadata(),
+        asus_aura_rainbow::metadata(),
         breathing::metadata(),
         audio_pulse::metadata(),
         color_wave::metadata(),
@@ -117,6 +125,8 @@ pub fn create_builtin_renderer(name: &str) -> Option<Box<dyn EffectRenderer>> {
         "solid_color" => Some(Box::new(SolidColorRenderer::new())),
         "gradient" => Some(Box::new(GradientRenderer::new())),
         "rainbow" => Some(Box::new(RainbowRenderer::new())),
+        "smooth_rgb_cycle" => Some(Box::new(SmoothRgbCycleRenderer::new())),
+        "asus_aura_rainbow" => Some(Box::new(AsusAuraRainbowRenderer::new())),
         "breathing" => Some(Box::new(BreathingRenderer::new())),
         "audio_pulse" => Some(Box::new(AudioPulseRenderer::new())),
         "color_wave" => Some(Box::new(ColorWaveRenderer::new())),

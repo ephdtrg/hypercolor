@@ -11,9 +11,9 @@ use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use hypercolor_core::effect::builtin::{
-    AudioPulseRenderer, BreathingRenderer, CalibrationRenderer, ColorWaveRenderer,
-    ColorZonesRenderer, GradientRenderer, RainbowRenderer, ScreenCastRenderer, SolidColorRenderer,
-    create_builtin_renderer, register_builtin_effects,
+    AsusAuraRainbowRenderer, AudioPulseRenderer, BreathingRenderer, CalibrationRenderer,
+    ColorWaveRenderer, ColorZonesRenderer, GradientRenderer, RainbowRenderer, ScreenCastRenderer,
+    SmoothRgbCycleRenderer, SolidColorRenderer, create_builtin_renderer, register_builtin_effects,
 };
 use hypercolor_core::effect::{EffectRegistry, EffectRenderer, FrameInput};
 use hypercolor_core::input::screen::consumer::{
@@ -24,7 +24,9 @@ use hypercolor_core::spatial::SpatialEngine;
 use hypercolor_types::audio::AudioData;
 use hypercolor_types::canvas::{Canvas, Rgba};
 use hypercolor_types::control::ControlValue;
-use hypercolor_types::effect::{EffectCategory, EffectId, EffectMetadata, EffectSource};
+use hypercolor_types::effect::{
+    ControlDefinition, EffectCategory, EffectId, EffectMetadata, EffectSource,
+};
 use hypercolor_types::sensor::SystemSnapshot;
 use hypercolor_types::spatial::{
     EdgeBehavior, LedTopology, NormalizedPosition, Output, SamplingMode, SpatialLayout,
@@ -109,6 +111,27 @@ fn frame_with_size(
     }
 }
 
+fn frame_with_timing(
+    time_secs: f64,
+    delta_secs: f32,
+    frame_number: u64,
+    width: u32,
+    height: u32,
+) -> FrameInput<'static> {
+    FrameInput {
+        time_secs,
+        delta_secs,
+        frame_number,
+        audio: &SILENCE,
+        interaction: &DEFAULT_INTERACTION,
+        screen: None,
+        sensors: &EMPTY_SENSORS,
+        sources: hypercolor_core::effect::FrameDataSources::default(),
+        canvas_width: width,
+        canvas_height: height,
+    }
+}
+
 fn frame_with_audio(time_secs: f64, audio: &AudioData) -> FrameInput<'_> {
     FrameInput {
         time_secs,
@@ -169,6 +192,51 @@ fn has_non_black_pixels(canvas: &hypercolor_types::canvas::Canvas) -> bool {
 /// Returns the pixel at (0, 0).
 fn top_left(canvas: &hypercolor_types::canvas::Canvas) -> Rgba {
     canvas.get_pixel(0, 0)
+}
+
+fn control<'a>(metadata: &'a EffectMetadata, id: &str) -> &'a ControlDefinition {
+    metadata
+        .controls
+        .iter()
+        .find(|control| control.id == id)
+        .unwrap_or_else(|| panic!("missing control '{id}' on {}", metadata.name))
+}
+
+fn assert_slider_contract(
+    metadata: &EffectMetadata,
+    id: &str,
+    default: f32,
+    min: f32,
+    max: f32,
+    step: f32,
+) {
+    let definition = control(metadata, id);
+    assert_eq!(
+        definition.default_value,
+        ControlValue::Float(f64::from(default))
+    );
+    assert_eq!(definition.min, Some(min));
+    assert_eq!(definition.max, Some(max));
+    assert_eq!(definition.step, Some(step));
+    assert!(definition.labels.is_empty());
+}
+
+fn assert_dropdown_contract(metadata: &EffectMetadata, id: &str, default: &str, labels: &[&str]) {
+    let definition = control(metadata, id);
+    assert_eq!(
+        definition.default_value,
+        ControlValue::Enum(default.to_owned())
+    );
+    assert_eq!(
+        definition.labels,
+        labels
+            .iter()
+            .map(|label| (*label).to_owned())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(definition.min, None);
+    assert_eq!(definition.max, None);
+    assert_eq!(definition.step, None);
 }
 
 fn render_color_wave(renderer: &mut ColorWaveRenderer, frames: u64) -> Canvas {
@@ -937,6 +1005,320 @@ fn rainbow_saturation_control_desaturates_to_grayscale() {
     );
 }
 
+// ── Smooth RGB Cycle Tests ─────────────────────────────────────────────────
+
+#[test]
+fn smooth_rgb_cycle_fills_every_pixel_uniformly() {
+    let mut renderer = SmoothRgbCycleRenderer::new();
+    renderer
+        .init(&make_metadata("smooth_rgb_cycle"))
+        .expect("init");
+
+    let canvas = renderer.render_frame(&frame(37.5, 10)).expect("render");
+    let first = canvas.get_pixel(0, 0);
+    let expected = [first.r, first.g, first.b, first.a];
+
+    assert!(
+        canvas.pixels().all(|pixel| pixel == expected),
+        "every pixel must have the same color"
+    );
+}
+
+#[test]
+fn smooth_rgb_cycle_forward_reverse_and_full_period_are_correct() {
+    let mut renderer = SmoothRgbCycleRenderer::new();
+    renderer
+        .init(&make_metadata("smooth_rgb_cycle"))
+        .expect("init");
+
+    let start = renderer.render_frame(&frame(0.0, 0)).expect("start");
+    let forward = renderer
+        .render_frame(&frame(40.0, 1))
+        .expect("forward one third");
+    let full_period = renderer
+        .render_frame(&frame(120.0, 2))
+        .expect("full period");
+
+    assert_eq!(
+        start.as_rgba_bytes(),
+        full_period.as_rgba_bytes(),
+        "a complete duration must return to the initial hue"
+    );
+    let forward_pixel = top_left(&forward);
+    assert!(
+        forward_pixel.g > forward_pixel.r && forward_pixel.g > forward_pixel.b,
+        "Forward at one third period should be green, got {forward_pixel:?}"
+    );
+
+    renderer.apply_test_control("direction", &ControlValue::Enum("Reverse".to_owned()));
+    let reverse = renderer
+        .render_frame(&frame(40.0, 3))
+        .expect("reverse one third");
+    let reverse_pixel = top_left(&reverse);
+    assert!(
+        reverse_pixel.b > reverse_pixel.r && reverse_pixel.b > reverse_pixel.g,
+        "Reverse at one third period should be blue, got {reverse_pixel:?}"
+    );
+}
+
+#[test]
+fn smooth_rgb_cycle_output_depends_on_absolute_time_not_fps() {
+    let mut renderer = SmoothRgbCycleRenderer::new();
+    renderer
+        .init(&make_metadata("smooth_rgb_cycle"))
+        .expect("init");
+
+    let slow = renderer
+        .render_frame(&frame_with_timing(17.25, 1.0 / 10.0, 173, W, H))
+        .expect("10 FPS render");
+    let fast = renderer
+        .render_frame(&frame_with_timing(17.25, 1.0 / 240.0, 4_140, W, H))
+        .expect("240 FPS render");
+
+    assert_eq!(slow.as_rgba_bytes(), fast.as_rgba_bytes());
+}
+
+#[test]
+fn smooth_rgb_cycle_large_time_wraps_without_drift() {
+    let mut renderer = SmoothRgbCycleRenderer::new();
+    renderer
+        .init(&make_metadata("smooth_rgb_cycle"))
+        .expect("init");
+
+    let reduced = renderer
+        .render_frame(&frame(40.0, 1))
+        .expect("reduced time");
+    let large = renderer
+        .render_frame(&frame(120.0 * 1_000_000.0 + 40.0, 2))
+        .expect("large time");
+
+    assert_eq!(reduced.as_rgba_bytes(), large.as_rgba_bytes());
+}
+
+#[test]
+fn smooth_rgb_cycle_controls_clamp_and_accept_serialized_direction() {
+    let mut renderer = SmoothRgbCycleRenderer::new();
+    renderer
+        .init(&make_metadata("smooth_rgb_cycle"))
+        .expect("init");
+
+    renderer.apply_test_control("direction", &ControlValue::Text("Reverse".to_owned()));
+    let reverse = renderer
+        .render_frame(&frame(40.0, 0))
+        .expect("text direction");
+    let reverse_pixel = top_left(&reverse);
+    assert!(reverse_pixel.b > reverse_pixel.r && reverse_pixel.b > reverse_pixel.g);
+
+    renderer.apply_test_control("cycle_duration", &ControlValue::Float(0.0));
+    renderer.apply_test_control("brightness", &ControlValue::Float(2.0));
+    renderer.apply_test_control("saturation", &ControlValue::Float(2.0));
+    renderer.apply_test_control("start_hue", &ControlValue::Float(-50.0));
+    let clamped = renderer
+        .render_frame(&frame(0.0, 1))
+        .expect("clamped controls");
+    let pixel = top_left(&clamped);
+
+    assert_eq!(pixel.a, u8::MAX);
+    assert!(pixel.r > 0 || pixel.g > 0 || pixel.b > 0);
+}
+
+#[test]
+fn smooth_rgb_cycle_resizes_caller_owned_canvas() {
+    let mut renderer = SmoothRgbCycleRenderer::new();
+    renderer
+        .init(&make_metadata("smooth_rgb_cycle"))
+        .expect("init");
+    let mut canvas = Canvas::new(1, 1);
+
+    renderer
+        .render_into(&frame_with_timing(0.0, 0.0, 0, 7, 3), &mut canvas)
+        .expect("first size");
+    assert_eq!((canvas.width(), canvas.height()), (7, 3));
+
+    renderer
+        .render_into(&frame_with_timing(1.0, 1.0, 1, 2, 4), &mut canvas)
+        .expect("second size");
+    assert_eq!((canvas.width(), canvas.height()), (2, 4));
+}
+
+// ── ASUS Aura Rainbow Tests ────────────────────────────────────────────────
+
+#[test]
+fn asus_aura_rainbow_is_uniform_vertically_and_varies_horizontally() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+
+    let canvas = renderer.render_frame(&frame(0.0, 0)).expect("render");
+    let row_len = W as usize * 4;
+    let mut rows = canvas.as_rgba_bytes().chunks_exact(row_len);
+    let first_row = rows.next().expect("canvas has a first row");
+
+    assert!(
+        rows.all(|row| row == first_row),
+        "every row must be identical"
+    );
+    assert_ne!(
+        canvas.get_pixel(0, 0),
+        canvas.get_pixel(1, 0),
+        "hue must vary along the horizontal axis"
+    );
+}
+
+#[test]
+fn asus_aura_rainbow_band_density_repeats_equal_full_cycles() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+    let input = frame_with_timing(0.0, 0.0, 0, 100, 2);
+    let canvas = renderer.render_frame(&input).expect("render");
+
+    for cycle_start in [0, 20, 40, 60, 80] {
+        assert_eq!(
+            canvas.get_pixel(0, 0),
+            canvas.get_pixel(cycle_start, 0),
+            "default density 5 must repeat every 20 pixels on a 100-pixel canvas"
+        );
+    }
+}
+
+#[test]
+fn asus_aura_rainbow_direction_moves_left_and_right() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+
+    renderer.apply_test_control("direction", &ControlValue::Enum("Left".to_owned()));
+    let left = renderer.render_frame(&frame(4.0, 0)).expect("left motion");
+    let left_origin = top_left(&left);
+    assert!(
+        left_origin.g > left_origin.r && left_origin.g > left_origin.b,
+        "Left at one third period should put green at the origin, got {left_origin:?}"
+    );
+
+    renderer.apply_test_control("direction", &ControlValue::Enum("Right".to_owned()));
+    let right = renderer.render_frame(&frame(4.0, 1)).expect("right motion");
+    let right_origin = top_left(&right);
+    assert!(
+        right_origin.b > right_origin.r && right_origin.b > right_origin.g,
+        "Right at one third period should put blue at the origin, got {right_origin:?}"
+    );
+}
+
+#[test]
+fn asus_aura_rainbow_is_seamless_after_one_cycle_duration() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+
+    let start = renderer.render_frame(&frame(0.0, 0)).expect("start");
+    let looped = renderer.render_frame(&frame(12.0, 1)).expect("looped");
+
+    assert_eq!(start.as_rgba_bytes(), looped.as_rgba_bytes());
+}
+
+#[test]
+fn asus_aura_rainbow_output_depends_on_absolute_time_not_fps() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+
+    let slow = renderer
+        .render_frame(&frame_with_timing(7.25, 1.0 / 10.0, 73, W, H))
+        .expect("10 FPS render");
+    let fast = renderer
+        .render_frame(&frame_with_timing(7.25, 1.0 / 240.0, 1_740, W, H))
+        .expect("240 FPS render");
+
+    assert_eq!(slow.as_rgba_bytes(), fast.as_rgba_bytes());
+}
+
+#[test]
+fn asus_aura_rainbow_large_time_wraps_without_drift() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+
+    let reduced = renderer.render_frame(&frame(4.0, 0)).expect("reduced time");
+    let large = renderer
+        .render_frame(&frame(12.0 * 1_000_000.0 + 4.0, 1))
+        .expect("large time");
+
+    assert_eq!(reduced.as_rgba_bytes(), large.as_rgba_bytes());
+}
+
+#[test]
+fn asus_aura_rainbow_has_no_black_or_transparent_gaps_at_defaults() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+
+    let canvas = renderer.render_frame(&frame(3.75, 0)).expect("render");
+    assert!(
+        canvas
+            .pixels()
+            .all(|[r, g, b, a]| { a == u8::MAX && (r > 0 || g > 0 || b > 0) })
+    );
+}
+
+#[test]
+fn asus_aura_rainbow_controls_clamp_and_accept_serialized_direction() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+
+    renderer.apply_test_control("direction", &ControlValue::Text("Left".to_owned()));
+    renderer.apply_test_control("start_hue", &ControlValue::Float(120.0));
+    let configured = renderer
+        .render_frame(&frame(0.0, 0))
+        .expect("configured render");
+    let configured_origin = top_left(&configured);
+    assert!(configured_origin.g > configured_origin.r && configured_origin.g > configured_origin.b);
+
+    renderer.apply_test_control("band_density", &ControlValue::Float(0.0));
+    renderer.apply_test_control("cycle_duration", &ControlValue::Float(0.0));
+    renderer.apply_test_control("brightness", &ControlValue::Float(2.0));
+    renderer.apply_test_control("saturation", &ControlValue::Float(2.0));
+    renderer.apply_test_control("start_hue", &ControlValue::Float(-10.0));
+    let clamped = renderer
+        .render_frame(&frame(2.0 / 3.0, 1))
+        .expect("clamped render");
+    let clamped_origin = top_left(&clamped);
+
+    assert_eq!(clamped_origin.a, u8::MAX);
+    assert!(
+        clamped_origin.g > clamped_origin.r && clamped_origin.g > clamped_origin.b,
+        "clamped two-second cycle moving Left should be green at one third period"
+    );
+}
+
+#[test]
+fn asus_aura_rainbow_resizes_caller_owned_canvas() {
+    let mut renderer = AsusAuraRainbowRenderer::new();
+    renderer
+        .init(&make_metadata("asus_aura_rainbow"))
+        .expect("init");
+    let mut canvas = Canvas::new(1, 1);
+
+    renderer
+        .render_into(&frame_with_timing(0.0, 0.0, 0, 11, 5), &mut canvas)
+        .expect("first size");
+    assert_eq!((canvas.width(), canvas.height()), (11, 5));
+
+    renderer
+        .render_into(&frame_with_timing(1.0, 1.0, 1, 3, 7), &mut canvas)
+        .expect("second size");
+    assert_eq!((canvas.width(), canvas.height()), (3, 7));
+}
+
 // ── Full Lifecycle Tests ────────────────────────────────────────────────────
 
 #[test]
@@ -1305,6 +1687,8 @@ fn factory_creates_all_builtins() {
         "solid_color",
         "gradient",
         "rainbow",
+        "smooth_rgb_cycle",
+        "asus_aura_rainbow",
         "breathing",
         "audio_pulse",
         "color_wave",
@@ -1336,7 +1720,7 @@ fn register_builtin_effects_populates_registry() {
     let mut registry = EffectRegistry::default();
     register_builtin_effects(&mut registry);
 
-    let expected_builtin_count = if cfg!(feature = "servo") { 11 } else { 10 };
+    let expected_builtin_count = if cfg!(feature = "servo") { 13 } else { 12 };
     assert_eq!(
         registry.len(),
         expected_builtin_count,
@@ -1345,7 +1729,7 @@ fn register_builtin_effects_populates_registry() {
 
     // Verify category filtering works
     let ambient = registry.by_category(EffectCategory::Ambient);
-    assert_eq!(ambient.len(), 6, "6 ambient effects expected");
+    assert_eq!(ambient.len(), 8, "8 ambient effects expected");
 
     let audio = registry.by_category(EffectCategory::Audio);
     assert_eq!(audio.len(), 1, "1 audio effect expected");
@@ -1390,6 +1774,8 @@ fn registered_builtins_use_human_readable_names_and_stable_native_keys() {
         ("Solid Color", "solid_color"),
         ("Gradient", "gradient"),
         ("Rainbow", "rainbow"),
+        ("Smooth RGB Cycle", "smooth_rgb_cycle"),
+        ("ASUS Aura Rainbow", "asus_aura_rainbow"),
         ("Breathing", "breathing"),
         ("Audio Pulse", "audio_pulse"),
         ("Color Wave", "color_wave"),
@@ -1512,13 +1898,121 @@ fn rainbow_metadata_includes_color_controls() {
 }
 
 #[test]
+fn smooth_rgb_cycle_metadata_matches_public_contract() {
+    let mut registry = EffectRegistry::default();
+    register_builtin_effects(&mut registry);
+    let (_, entry) = registry
+        .iter()
+        .find(|(_, entry)| entry.metadata.source.source_stem() == Some("smooth_rgb_cycle"))
+        .expect("Smooth RGB Cycle should be registered");
+    let metadata = &entry.metadata;
+
+    assert_eq!(metadata.name, "Smooth RGB Cycle");
+    assert_eq!(metadata.category, EffectCategory::Ambient);
+    assert_slider_contract(metadata, "cycle_duration", 120.0, 10.0, 600.0, 1.0);
+    assert_slider_contract(metadata, "brightness", 0.7, 0.0, 1.0, 0.01);
+    assert_slider_contract(metadata, "saturation", 1.0, 0.0, 1.0, 0.01);
+    assert_dropdown_contract(metadata, "direction", "Forward", &["Forward", "Reverse"]);
+    assert_slider_contract(metadata, "start_hue", 0.0, 0.0, 360.0, 1.0);
+    assert_eq!(metadata.presets.len(), 3);
+
+    let defaults = metadata
+        .presets
+        .iter()
+        .find(|preset| preset.name == "Smooth Spectrum")
+        .expect("default Smooth Spectrum preset");
+    assert_eq!(
+        defaults.controls.get("cycle_duration"),
+        Some(&ControlValue::Float(120.0))
+    );
+    assert_eq!(
+        defaults.controls.get("brightness"),
+        Some(&ControlValue::Float(0.7))
+    );
+    assert_eq!(
+        defaults.controls.get("saturation"),
+        Some(&ControlValue::Float(1.0))
+    );
+    assert_eq!(
+        defaults.controls.get("direction"),
+        Some(&ControlValue::Enum("Forward".to_owned()))
+    );
+    assert_eq!(
+        defaults.controls.get("start_hue"),
+        Some(&ControlValue::Float(0.0))
+    );
+}
+
+#[test]
+fn asus_aura_rainbow_metadata_matches_public_contract() {
+    let mut registry = EffectRegistry::default();
+    register_builtin_effects(&mut registry);
+    let (_, entry) = registry
+        .iter()
+        .find(|(_, entry)| entry.metadata.source.source_stem() == Some("asus_aura_rainbow"))
+        .expect("ASUS Aura Rainbow should be registered");
+    let metadata = &entry.metadata;
+
+    assert_eq!(metadata.name, "ASUS Aura Rainbow");
+    assert_eq!(metadata.category, EffectCategory::Ambient);
+    assert!(
+        metadata
+            .description
+            .to_ascii_lowercase()
+            .contains("approximation")
+    );
+    assert_slider_contract(metadata, "band_density", 5.0, 1.0, 20.0, 1.0);
+    assert_slider_contract(metadata, "cycle_duration", 12.0, 2.0, 120.0, 1.0);
+    assert_dropdown_contract(metadata, "direction", "Right", &["Left", "Right"]);
+    assert_slider_contract(metadata, "brightness", 0.7, 0.0, 1.0, 0.01);
+    assert_slider_contract(metadata, "saturation", 1.0, 0.0, 1.0, 0.01);
+    assert_slider_contract(metadata, "start_hue", 0.0, 0.0, 360.0, 1.0);
+    assert_eq!(metadata.presets.len(), 3);
+
+    let defaults = metadata
+        .presets
+        .iter()
+        .find(|preset| preset.name == "Aura Cold Boot Approximation")
+        .expect("default Aura approximation preset");
+    assert_eq!(
+        defaults.controls.get("band_density"),
+        Some(&ControlValue::Float(5.0))
+    );
+    assert_eq!(
+        defaults.controls.get("cycle_duration"),
+        Some(&ControlValue::Float(12.0))
+    );
+    assert_eq!(
+        defaults.controls.get("direction"),
+        Some(&ControlValue::Enum("Right".to_owned()))
+    );
+    assert_eq!(
+        defaults.controls.get("brightness"),
+        Some(&ControlValue::Float(0.7))
+    );
+    assert_eq!(
+        defaults.controls.get("saturation"),
+        Some(&ControlValue::Float(1.0))
+    );
+    assert_eq!(
+        defaults.controls.get("start_hue"),
+        Some(&ControlValue::Float(0.0))
+    );
+}
+
+#[test]
 fn registered_effects_searchable_by_name() {
     let mut registry = EffectRegistry::default();
     register_builtin_effects(&mut registry);
 
     let results = registry.search("rainbow");
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].metadata.name, "Rainbow");
+    let names: Vec<&str> = results
+        .iter()
+        .map(|entry| entry.metadata.name.as_str())
+        .collect();
+    assert_eq!(results.len(), 2, "found: {names:?}");
+    assert!(names.contains(&"Rainbow"));
+    assert!(names.contains(&"ASUS Aura Rainbow"));
 }
 
 #[test]
